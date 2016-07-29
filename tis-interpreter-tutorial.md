@@ -32,6 +32,48 @@ Good, but not great.
 
 %%%
 
+STEP 3
 
+The error we get means that tis-interpreter, when it puts all the source files together, sees two different types for the function `deflate`, and more to the point, the types seen for `deflate` are different because they use different definitions, in fine, for `struct internal_state`. Grepping for `struct internal_state` takes us to [this “hack for buggy compilers”](https://github.com/pascal-cuoq/zlib-fork/blob/a52f0241f72433b69fd558100a32d927d9571e20/zlib.h#L1740) that is only accepted by non-buggy compilers because they lack any sort of link-time type validation (in theory, having different incompatible types for the same external-linkage variable in different files is undefined behavior, but zlib's use of undefined behavior obviously works in practice with nearly all compilers, since zlib is used everywhere.
 
+We will simply define `NO_DUMMY_DECL` for now, although I wish that those with the buggy C compilers would have to opt-in to the ugly hack instead of the reverse. The commands invoking `tis-interpreter` become:
 
+```
+gzip < compress.c > compress.c.gz
+tis-mkfs -local input.gz:compress.c.gz -nb-max-files 5
+tis-interpreter.sh test/minigzip.c *.c --fs -val-args=" -d input.gz" --cc -DNO_DUMMY_DECL
+```
+
+The new result we get is:
+```
+$ tis-interpreter.sh test/minigzip.c *.c --fs -val-args=" -d input.gz" --cc -DNO_DUMMY_DECL
+[value] Analyzing a complete application starting at main
+[value] Computing initial state
+[value] Initial state computed
+
+NIY WARNING: new file isn't being added to the dirent
+
+crc32.c:257:[value] warning: The following sub-expression cannot be evaluated:
+                 (long)buf_0 & (long)3
+                 
+                 All sub-expressions with their values:
+                 long  (long)buf_0 ∈ {{ (long)&hbuf }}
+                 long  (long)3 ∈ {3}
+                 unsigned char const *  buf_0 ∈ {{ &hbuf[0] }}
+                 int  3 ∈ {3}
+                 
+                 Stopping
+                 stack: crc32_little :: crc32.c:222 <-
+                        crc32 :: inflate.c:649 <-
+                        inflate :: gzread.c:191 <-
+                        gz_decomp :: gzread.c:248 <-
+                        gz_fetch :: gzread.c:347 <-
+                        gzread :: test/minigzip.c:439 <-
+                        gz_uncompress :: test/minigzip.c:540 <-
+                        file_uncompress :: test/minigzip.c:629 <-
+                        main
+```
+
+The first message, “NIY WARNING: new file isn't being added to the dirent”, is partially good news: it means that minigzip goes as far as creating a new file `input`. The bad news is that support for creating new files in tis-mkfs is still partial, but this does not need to worry us for now.
+
+The next message indicates that tis-interpreter was unable to preserve the property that the values of variables at each point of the execution are the only possible values for these variables at that respective point. The construct causing problem, [here](https://github.com/pascal-cuoq/zlib-fork/blob/a52f0241f72433b69fd558100a32d927d9571e20/crc32.c#L257), is `(ptrdiff_t)buf & 3`, which takes different values depending on the alignment of the pointer `buf`.
