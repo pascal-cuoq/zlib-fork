@@ -1,3 +1,6 @@
 *~
 configure.log
 zlib.pc
+*.gz
+mkfs_filesystem.c
+mkfs_filesystem.h
