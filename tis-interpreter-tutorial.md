@@ -77,3 +77,33 @@ crc32.c:257:[value] warning: The following sub-expression cannot be evaluated:
 The first message, “NIY WARNING: new file isn't being added to the dirent”, is partially good news: it means that minigzip goes as far as creating a new file `input`. The bad news is that support for creating new files in tis-mkfs is still partial, but this does not need to worry us for now.
 
 The next message indicates that tis-interpreter was unable to preserve the property that the values of variables at each point of the execution are the only possible values for these variables at that respective point. The construct causing problem, [here](https://github.com/pascal-cuoq/zlib-fork/blob/a52f0241f72433b69fd558100a32d927d9571e20/crc32.c#L257), is `(ptrdiff_t)buf & 3`, which takes different values depending on the alignment of the pointer `buf`.
+
+%%%
+
+STEP 4
+
+There exists an obscure commandline option to tell tis-interpreter to remain silent while analyzing the function `crc32_little` as written, but I would rather not use it here and change the source code instead. The obscure option is `-address-alignment 4`. It tells tis-interpreter to assume that every base address is a multiple of 4. The first reason for changing the source code instead of using that option is that without the option, tis-interpreter guarantees that the meaning of the program does not depend on parameters outside the programmer's control, such as the actual integers used as representations of addresses. Using the option means trading some of tis-interpreter's sensitivity in exchange for silence in the logs. The software's behavior, as written, does depend on the alignment of the `buf` pointer, and that makes it more difficult to test. The zlib librarycould, for instance, work fine on a specific test platform for all the testcases in the world because the test platform happens to align `buf`, and still fail when deployed on a different platform.
+
+The second reason I would rather change the code here is that I have been interested in “strict aliasing” violations [recently](http://trust-in-soft.com/how-do-you-report-bugs-that-you-alone-can-see/), and the `*buf4` in function `crc32_little`, [using](https://github.com/pascal-cuoq/zlib-fork/blob/a52f0241f72433b69fd558100a32d927d9571e20/crc32.c#L241) a 32-bit `unsigned int` to access four `unsigned char`, violates these rules. A C compiler would be free to start miscompiling this function tomorrow even if it has been kind enough, until now, to respect the authors' intentions.
+
+After removing the difficult-to-test and undefined-behavior-inducing part of the `crc32_little` function, we get to a state where tis-interpreter no longer gets stuck in this function, and warns about something else further down the execution:
+
+```
+$ tis-interpreter.sh test/minigzip.c *.c --fs -val-args=" -d input.gz" --cc -DNO_DUMMY_DECL
+[value] Analyzing a complete application starting at main
+[value] Computing initial state
+[value] Initial state computed
+
+NIY WARNING: new file isn't being added to the dirent
+
+inftrees.c:188:[kernel] warning: pointer arithmetic: assert \inside_object(base-257);
+                  stack: inflate_table :: inflate.c:1000 <-
+                         inflate :: gzread.c:191 <-
+                         gz_decomp :: gzread.c:248 <-
+                         gz_fetch :: gzread.c:347 <-
+                         gzread :: test/minigzip.c:439 <-
+                         gz_uncompress :: test/minigzip.c:540 <-
+                         file_uncompress :: test/minigzip.c:629 <-
+                         main
+[value] Stopping at nth alarm
+```
