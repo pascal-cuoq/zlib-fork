@@ -117,3 +117,42 @@ The `inftrees.c` warning is easy to confirm, but a bit unpleasant to deal with: 
 An implementation-defined solution for compilation platforms with a flat address space is to use only `uintptr_t` to refer to addresses outside `lbase`. This solution may still cause issues on platforms where the mapping between pointers and integers is more complicated than the one-to-one correspondance of flat address spaces, but let's face it, if you are targeting a platform without a flat address space, you should not be playing with out-of-bounds pointers either.
 
 There may exist a cleaner solution than the one implemented in this commit for pointers `base` and `extra`, but I do not immediately see it.
+
+---
+
+STEP 6
+
+The next message from tis-interpreter indicates another pointer going out of bounds in a way that was quite harmless in the 1990s. Again, the pointer trick is intentional but is becoming increasingly likely to bite you as compiler authors become “more interested in trying to find out what can be allowed by the c99 specs than about making things actually work”:
+
+```
+inffast.c:101:[kernel] warning: pointer arithmetic: assert \inside_object(strm->next_out-1);
+                  stack: inflate_fast :: inflate.c:1024 <-
+                         inflate :: gzread.c:191 <-
+                         gz_decomp :: gzread.c:248 <-
+                         gz_fetch :: gzread.c:347 <-
+                         gzread :: test/minigzip.c:439 <-
+                         gz_uncompress :: test/minigzip.c:540 <-
+                         file_uncompress :: test/minigzip.c:629 <-
+                         main
+```
+
+Fortunately the solution this time is already included in the zlib 1.2.8 source code: the out of bound pointer resulting from the `*++(a)` [anti-pattern](https://github.com/pascal-cuoq/zlib-fork/blob/523520f0c92f5d8a40d7f53c532cd02784176185/inffast.c#L24-L30) can be avoided by defining `POSTINC`, which makes the code use the `*(a)++` pattern instead.
+
+And it seems this is the last change needed to decompress `input.gz` without invoking undefined behaviors (as detected by tis-interpreter):
+
+```
+$ gzip < compress.c > compress.c.gz
+$ tis-mkfs -local input.gz:compress.c.gz -nb-max-files 5
+$ tis-interpreter.sh test/minigzip.c *.c --fs -val-args=" -d input.gz" --cc -DNO_DUMMY_DECL --cc -DPOSTINC
+[value] Analyzing a complete application starting at main
+[value] Computing initial state
+[value] Initial state computed
+
+NIY WARNING: new file isn't being added to the dirent
+
+
+NIY WARNING: unlinked file not being removed from dirent
+
+[value] done for function main
+```
+
