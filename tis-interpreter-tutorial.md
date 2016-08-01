@@ -107,3 +107,13 @@ inftrees.c:188:[kernel] warning: pointer arithmetic: assert \inside_object(base-
                          main
 [value] Stopping at nth alarm
 ```
+
+---
+
+STEP 5
+
+The `inftrees.c` warning is easy to confirm, but a bit unpleasant to deal with: the code [is making](https://github.com/pascal-cuoq/zlib-fork/blob/6efef49d0ffd78f82e1ae7127cc3819d64ebc219/inftrees.c#L187-L188) the pointer `base` point to the first element of an array `lbase`, and then subtracts 257 from it using pointer arithmetic. The intention is to make a sort of 257-indexed array, but these aren't any more allowed than [1-indexed arrays made by subtracting one](http://blog.regehr.org/archives/1292) are.
+
+An implementation-defined solution for compilation platforms with a flat address space is to use only `uintptr_t` to refer to addresses outside `lbase`. This solution may still cause issues on platforms where the mapping between pointers and integers is more complicated than the one-to-one correspondance of flat address spaces, but let's face it, if you are targeting a platform without a flat address space, you should not be playing with out-of-bounds pointers either.
+
+There may exist a cleaner solution than the one implemented in this commit for pointers `base` and `extra`, but I do not immediately see it.
