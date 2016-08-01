@@ -1,10 +1,10 @@
-STEP 1
+# STEP 1
 
 Typing `./configure` modifies the files `Makefile` and `zconf.h`, and generates a couple of other files that weren't present. tis-interpreter, as a compilation platform, is identical neither  to the host platform on which I typed `./configure` nor to the minimal compilation platform that the initial zconf.h targeted without assumptions. But tis-interpreter is closer to the latter, and also I may want to compile zlib with an ordinary compiler later, so I will go with the flow and start from the `zconf.h` that was generated when I typed `./configure`. We will not use the generated `Makefile` for tis-interpreter, instead passing the C source files on the command-line.
 
-%%%
+---
 
-STEP 2
+# STEP 2
 
 We will want to invoke the program minigzip, provided in the [tests] directory, in decompression mode, as if this utility had been invoked as `program -d input.gz`. Note that minigzip [tests the name it has been invoked under](https://github.com/pascal-cuoq/zlib-fork/blob/6efef49d0ffd78f82e1ae7127cc3819d64ebc219/test/minigzip.c#L579). By default, tis-interpreter invokes it as “program”, but we use the command-line options to specify decompression:
 
@@ -30,11 +30,11 @@ The result we get is:
 
 Good, but not great.
 
-%%%
+---
 
-STEP 3
+# STEP 3
 
-The error we get means that tis-interpreter, when it puts all the source files together, sees two different types for the function `deflate`, and more to the point, the types seen for `deflate` are different because they use different definitions, in fine, for `struct internal_state`. Grepping for `struct internal_state` takes us to [this “hack for buggy compilers”](https://github.com/pascal-cuoq/zlib-fork/blob/a52f0241f72433b69fd558100a32d927d9571e20/zlib.h#L1740) that is only accepted by non-buggy compilers because they lack any sort of link-time type validation (in theory, having different incompatible types for the same external-linkage variable in different files is undefined behavior, but zlib's use of undefined behavior obviously works in practice with nearly all compilers, since zlib is used everywhere.
+The error we get means that tis-interpreter, when it puts all the source files together, sees two different types for the function `deflate`, and more to the point, the types seen for `deflate` are different because they use different definitions, in fine, for `struct internal_state`. Grepping for `struct internal_state` takes us to [this “hack for buggy compilers”](https://github.com/pascal-cuoq/zlib-fork/blob/a52f0241f72433b69fd558100a32d927d9571e20/zlib.h#L1740) that is only accepted by non-buggy compilers because they lack any sort of link-time type validation (in theory, having different incompatible types for the same external-linkage variable in different files is undefined behavior, but zlib's use of undefined behavior obviously works in practice with nearly all compilers, since zlib is used everywhere).
 
 We will simply define `NO_DUMMY_DECL` for now, although I wish that those with the buggy C compilers would have to opt-in to the ugly hack instead of the reverse. The commands invoking `tis-interpreter` become:
 
@@ -78,9 +78,9 @@ The first message, “NIY WARNING: new file isn't being added to the dirent”, 
 
 The next message indicates that tis-interpreter was unable to preserve the property that the values of variables at each point of the execution are the only possible values for these variables at that respective point. The construct causing problem, [here](https://github.com/pascal-cuoq/zlib-fork/blob/a52f0241f72433b69fd558100a32d927d9571e20/crc32.c#L257), is `(ptrdiff_t)buf & 3`, which takes different values depending on the alignment of the pointer `buf`.
 
-%%%
+---
 
-STEP 4
+# STEP 4
 
 There exists an obscure commandline option to tell tis-interpreter to remain silent while analyzing the function `crc32_little` as written, but I would rather not use it here and change the source code instead. The obscure option is `-address-alignment 4`. It tells tis-interpreter to assume that every base address is a multiple of 4. The first reason for changing the source code instead of using that option is that without the option, tis-interpreter guarantees that the meaning of the program does not depend on parameters outside the programmer's control, such as the actual integers used as representations of addresses. Using the option means trading some of tis-interpreter's sensitivity in exchange for silence in the logs. The software's behavior, as written, does depend on the alignment of the `buf` pointer, and that makes it more difficult to test. The zlib librarycould, for instance, work fine on a specific test platform for all the testcases in the world because the test platform happens to align `buf`, and still fail when deployed on a different platform.
 
@@ -110,7 +110,7 @@ inftrees.c:188:[kernel] warning: pointer arithmetic: assert \inside_object(base-
 
 ---
 
-STEP 5
+# STEP 5
 
 The `inftrees.c` warning is easy to confirm, but a bit unpleasant to deal with: the code [is making](https://github.com/pascal-cuoq/zlib-fork/blob/6efef49d0ffd78f82e1ae7127cc3819d64ebc219/inftrees.c#L187-L188) the pointer `base` point to the first element of an array `lbase`, and then subtracts 257 from it using pointer arithmetic. The intention is to make a sort of 257-indexed array, but these aren't any more allowed than [1-indexed arrays made by subtracting one](http://blog.regehr.org/archives/1292) are.
 
@@ -120,7 +120,7 @@ There may exist a cleaner solution than the one implemented in this commit for p
 
 ---
 
-STEP 6
+# STEP 6
 
 The next message from tis-interpreter indicates another pointer going out of bounds in a way that was quite harmless in the 1990s. Again, the pointer trick is intentional but is becoming increasingly likely to bite you as compiler authors become “more interested in trying to find out what can be allowed by the c99 specs than about making things actually work”:
 
@@ -136,7 +136,7 @@ inffast.c:101:[kernel] warning: pointer arithmetic: assert \inside_object(strm->
                          main
 ```
 
-Fortunately the solution this time is already included in the zlib 1.2.8 source code: the out of bound pointer resulting from the `*++(a)` [anti-pattern](https://github.com/pascal-cuoq/zlib-fork/blob/523520f0c92f5d8a40d7f53c532cd02784176185/inffast.c#L24-L30) can be avoided by defining `POSTINC`, which makes the code use the `*(a)++` pattern instead.
+Fortunately the solution this time is already included in the zlib 1.2.8 source code: the out of bound pointer resulting from the `*++(a)` [anti-pattern](https://github.com/pascal-cuoq/zlib-fork/blob/523520f0c92f5d8a40d7f53c532cd02784176185/inffast.c#L24-L30) can be avoided by defining `POSTINC`, which makes zlib use the `*(a)++` pattern instead.
 
 And it seems this is the last change needed to decompress `input.gz` without invoking undefined behaviors (as detected by tis-interpreter):
 
